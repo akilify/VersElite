@@ -9,13 +9,14 @@ import { FloatingNav } from "@/components/FloatingNav";
 import { AuthModal } from "@/components/AuthModal";
 import { AIAssistant } from "@/components/AIAssistant";
 import {
-  Save, Maximize2, Minimize2, History, FileText,
-  Loader2, Check, AlertCircle, ChevronRight, ChevronLeft, Upload,
-  HelpCircle, Wifi, WifiOff, Volume2
+  Maximize2, Minimize2, History, FileText,
+  Loader2, Check, AlertCircle, ChevronRight, ChevronLeft,
+  HelpCircle, Wifi, WifiOff,
 } from "lucide-react";
 import { syllable } from "syllable";
-import WaveSurfer from "wavesurfer.js";
 import useSound from "use-sound";
+import { AudioRecorder } from "@/components/AudioRecorder";
+import { VideoRecorder } from "@/components/VideoRecorder";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -333,8 +334,6 @@ export default function CreatePage() {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef(content);
   const titleRef = useRef(title);
-  const waveformRef = useRef<HTMLDivElement>(null);
-  const wavesurferRef = useRef<WaveSurfer | null>(null);
 
   // Auto-save debounce
   const [debouncedContent] = useDebounce(content, 3000);
@@ -414,35 +413,16 @@ export default function CreatePage() {
   }, [pendingPublishes, draftId]);
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Auth guard
+  // useEffect Hooks
   // ───────────────────────────────────────────────────────────────────────────
-  if (!session) {
-    return (
-      <>
-        <div className="min-h-screen bg-[#0B0B0C] flex items-center justify-center text-white">
-          <div className="text-center">
-            <h1 className="text-2xl font-serif mb-4">Sign in to write</h1>
-            <button onClick={() => setIsAuthModalOpen(true)} className="bg-[#D4AF37] text-black px-6 py-3 rounded-full">
-              Sign In
-            </button>
-          </div>
-        </div>
-        <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
-      </>
-    );
-  }
 
-  // ───────────────────────────────────────────────────────────────────────────
   // Load pending publishes on mount
-  // ───────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const stored = localStorage.getItem(`verselite_pending_publishes_${session?.user?.id}`);
     if (stored) setPendingPublishes(JSON.parse(stored));
   }, [session]);
 
-  // ───────────────────────────────────────────────────────────────────────────
   // Online/Offline detection
-  // ───────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const handleOnline = async () => {
       setIsOnline(true);
@@ -464,9 +444,7 @@ export default function CreatePage() {
     };
   }, [syncLocalDraft, syncPendingPublishes]);
 
-  // ───────────────────────────────────────────────────────────────────────────
   // Load draft (remote first, then local fallback)
-  // ───────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const loadDraft = async () => {
       if (isOnline) {
@@ -494,27 +472,7 @@ export default function CreatePage() {
     loadDraft();
   }, [session, isOnline]);
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // WaveSurfer for audio preview
-  // ───────────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (type !== "spoken_audio" || !mediaUrl || !waveformRef.current) return;
-    const ws = WaveSurfer.create({
-      container: waveformRef.current,
-      waveColor: "#D4AF37",
-      progressColor: "#b08c2c",
-      cursorColor: "#D4AF37",
-      height: 60,
-      barWidth: 2,
-    });
-    ws.load(mediaUrl);
-    wavesurferRef.current = ws;
-    return () => ws.destroy();
-  }, [type, mediaUrl]);
-
-  // ───────────────────────────────────────────────────────────────────────────
   // Auto-save (local + remote)
-  // ───────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const saveDraft = async () => {
       if (!session?.user?.id) return;
@@ -556,31 +514,26 @@ export default function CreatePage() {
       titleRef.current = debouncedTitle;
       saveDraft();
     }
-  }, [debouncedContent, debouncedTitle, isOnline]);
+  }, [debouncedContent, debouncedTitle, isOnline, draftId, session, saveLocalDraft, playSave]);
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Media upload
+  // Auth Guard
   // ───────────────────────────────────────────────────────────────────────────
-  const handleMediaUpload = async (file: File) => {
-    const ext = file.name.split(".").pop();
-    const path = `${session.user.id}/${Date.now()}.${ext}`;
-    const { error, data } = await supabase.storage.from("media").upload(path, file);
-    if (!error) {
-      const url = supabase.storage.from("media").getPublicUrl(data.path).data.publicUrl;
-      setMediaUrl(url);
-    }
-  };
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // Get selected word for rhyme
-  // ───────────────────────────────────────────────────────────────────────────
-  const handleTextSelection = () => {
-    const selection = window.getSelection();
-    const selectedText = selection?.toString().trim();
-    if (selectedText && selectedText.split(/\s+/).length === 1) {
-      setRhymeWord(selectedText);
-    }
-  };
+  if (!session) {
+    return (
+      <>
+        <div className="min-h-screen bg-[#0B0B0C] flex items-center justify-center text-white">
+          <div className="text-center">
+            <h1 className="text-2xl font-serif mb-4">Sign in to write</h1>
+            <button onClick={() => setIsAuthModalOpen(true)} className="bg-[#D4AF37] text-black px-6 py-3 rounded-full">
+              Sign In
+            </button>
+          </div>
+        </div>
+        <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
+      </>
+    );
+  }
 
   // ───────────────────────────────────────────────────────────────────────────
   // Keyboard shortcuts
@@ -589,6 +542,14 @@ export default function CreatePage() {
   useHotkeys("ctrl+/", () => setAiPanelOpen(!aiPanelOpen), [aiPanelOpen]);
   useHotkeys("ctrl+s", (e) => { e.preventDefault(); }, []);
   useHotkeys("?", () => setShortcutModalOpen(true), [], { preventDefault: true });
+
+  const handleTextSelection = () => {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim();
+    if (selectedText && selectedText.split(/\s+/).length === 1) {
+      setRhymeWord(selectedText);
+    }
+  };
 
   // ───────────────────────────────────────────────────────────────────────────
   // Render
@@ -722,51 +683,29 @@ export default function CreatePage() {
         {/* Editor */}
         <div className={`flex-1 p-6 ${aiPanelOpen ? "pr-4" : ""}`}>
           <div className="flex h-full">
-            {showLineNumbers && (
+            {showLineNumbers && type === "written" && (
               <div className="w-12 py-2 text-right text-[#2a2a2e] text-sm font-mono select-none pr-3 border-r border-[#1f1f22]">
                 {content.split("\n").map((_, i) => (
                   <div key={i}>{i + 1}</div>
                 ))}
               </div>
             )}
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              onMouseUp={handleTextSelection}
-              placeholder="Start writing..."
-              className={`flex-1 bg-transparent text-[#F5F5F5] text-lg leading-relaxed outline-none resize-none p-2 font-serif placeholder-[#3a3a3e] ${focusMode ? "text-2xl" : ""}`}
-              style={{ minHeight: focusMode ? "100vh" : "600px" }}
-            />
-          </div>
 
-          {/* Spoken Word Uploader + Preview */}
-          {type !== "written" && (
-            <div className="mt-6 border-t border-[#1f1f22] pt-4">
-              <label className="flex items-center gap-3 cursor-pointer text-[#A1A1AA] hover:text-[#D4AF37]">
-                <Upload size={16} />
-                <span>Upload {type === "spoken_audio" ? "Audio" : "Video"}</span>
-                <input
-                  type="file"
-                  accept={type === "spoken_audio" ? "audio/*" : "video/*"}
-                  className="hidden"
-                  onChange={(e) => e.target.files?.[0] && handleMediaUpload(e.target.files[0])}
-                />
-              </label>
-              {mediaUrl && type === "spoken_audio" && (
-                <div className="mt-3">
-                  <div ref={waveformRef} />
-                  <button onClick={() => wavesurferRef.current?.playPause()} className="mt-2 text-xs text-[#D4AF37]">
-                    <Volume2 size={14} className="inline mr-1" /> Play/Pause
-                  </button>
-                </div>
-              )}
-              {mediaUrl && type === "spoken_video" && (
-                <div className="mt-3">
-                  <video src={mediaUrl} controls className="max-h-40 rounded" />
-                </div>
-              )}
-            </div>
-          )}
+            {type === "written" ? (
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                onMouseUp={handleTextSelection}
+                placeholder="Start writing..."
+                className={`flex-1 bg-transparent text-[#F5F5F5] text-lg leading-relaxed outline-none resize-none p-2 font-serif placeholder-[#3a3a3e] ${focusMode ? "text-2xl" : ""}`}
+                style={{ minHeight: focusMode ? "100vh" : "600px" }}
+              />
+            ) : type === "spoken_audio" ? (
+              <AudioRecorder mediaUrl={mediaUrl} onMediaChange={setMediaUrl} />
+            ) : (
+              <VideoRecorder mediaUrl={mediaUrl} onMediaChange={setMediaUrl} />
+            )}
+          </div>
         </div>
 
         {/* AI Panel */}
