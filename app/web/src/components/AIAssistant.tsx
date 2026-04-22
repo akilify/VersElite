@@ -8,6 +8,9 @@ import {
   Check,
   Trash2,
   PenTool,
+  Wand2,
+  RefreshCw,
+  Lightbulb,
 } from "lucide-react";
 import { chatWithAI } from "@/features/ai/ai.api";
 
@@ -21,6 +24,7 @@ interface Message {
 interface AIAssistantProps {
   onInsert: (text: string) => void;
   currentContent?: string;
+  selectedText?: string; // New: pass selected text from editor
 }
 
 // Format AI responses for clean editor insertion
@@ -38,16 +42,42 @@ const formatAIResponse = (text: string): string => {
     .trim();
 };
 
+// Pre-defined quick actions
+const QUICK_ACTIONS = [
+  {
+    label: "Continue",
+    icon: Wand2,
+    prompt: "Continue writing from where I left off. Match the tone and style.",
+  },
+  {
+    label: "Improve",
+    icon: Sparkles,
+    prompt: "Improve the following text while keeping its meaning and voice.",
+  },
+  {
+    label: "Rhymes",
+    icon: Lightbulb,
+    prompt: "Suggest rhyming words or phrases related to the current content.",
+  },
+  {
+    label: "Rewrite",
+    icon: RefreshCw,
+    prompt:
+      "Rewrite the following stanza in a different style (e.g., more lyrical, concise, or vivid).",
+  },
+];
+
 export function AIAssistant({
   onInsert,
   currentContent = "",
+  selectedText = "",
 }: AIAssistantProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
       role: "assistant",
       content:
-        "Hello! I'm your poetry assistant. You can ask me to:\n• Generate a poetry plan\n• Write a stanza or full poem\n• Refine or continue your draft\n\nWhat would you like help with?",
+        "Hello! I'm your poetry assistant. Use the quick actions below or ask me anything.",
       timestamp: new Date(),
     },
   ]);
@@ -64,32 +94,32 @@ export function AIAssistant({
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+  const sendMessage = async (messageContent: string) => {
+    if (!messageContent.trim() || isLoading) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input.trim(),
+      content: messageContent.trim(),
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, userMessage]);
-    setInput("");
     setIsLoading(true);
 
     try {
-      // Prepare messages for API (omit id and timestamp)
       const apiMessages = [...messages, userMessage].map((m) => ({
         role: m.role,
         content: m.content,
       }));
 
-      const response = await chatWithAI(apiMessages, currentContent);
+      // Include selected text or fallback to current content
+      const context = selectedText || currentContent;
+      const response = await chatWithAI(apiMessages, context);
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: formatAIResponse(response.reply), // Assuming backend returns { reply: "..." }
+        content: formatAIResponse(response.reply),
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
@@ -104,6 +134,21 @@ export function AIAssistant({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSend = () => {
+    sendMessage(input);
+    setInput("");
+  };
+
+  const handleQuickAction = (action: (typeof QUICK_ACTIONS)[0]) => {
+    let prompt = action.prompt;
+    if (selectedText) {
+      prompt = `${prompt}\n\nSelected text: "${selectedText}"`;
+    } else if (currentContent) {
+      prompt = `${prompt}\n\nCurrent draft: "${currentContent.slice(0, 500)}${currentContent.length > 500 ? "..." : ""}"`;
+    }
+    sendMessage(prompt);
   };
 
   const handleCopy = async (content: string, id: string) => {
@@ -135,6 +180,21 @@ export function AIAssistant({
         >
           <Trash2 size={14} />
         </button>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="px-4 py-3 border-b border-[#1f1f22] flex flex-wrap gap-2">
+        {QUICK_ACTIONS.map((action) => (
+          <button
+            key={action.label}
+            onClick={() => handleQuickAction(action)}
+            disabled={isLoading}
+            className="px-3 py-1.5 text-xs bg-[#1f1f22] hover:bg-[#2a2a2e] text-[#A1A1AA] hover:text-[#D4AF37] rounded-full flex items-center gap-1.5 transition disabled:opacity-50"
+          >
+            <action.icon size={12} />
+            {action.label}
+          </button>
+        ))}
       </div>
 
       {/* Messages */}
@@ -208,7 +268,7 @@ export function AIAssistant({
           </button>
         </div>
         <p className="text-xs text-[#A1A1AA] mt-2 text-center">
-          Press Enter to send • AI can write, plan, or refine
+          Press Enter to send • Try quick actions above
         </p>
       </div>
     </div>
