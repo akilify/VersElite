@@ -13,7 +13,7 @@ import ExplorePage from "@/pages/ExplorePage";
 import EventsPage from "./pages/EventsPage";
 import EventDetail from "./pages/EventDetail";
 import CreateEvent from "./pages/CreateEvent";
-import CreatePage from "./pages/CreatePage"
+import CreatePage from "@/pages/CreatePage/CreatePage";
 export default function App() {
   return (
     <BrowserRouter>
