@@ -3,8 +3,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
-import { authenticateUser } from "./middleware/auth.js";
 import newsletterRoutes from "./routes/newsletter/newsletter.routes.js";
+import chatRoutes from "./routes/ai/chat.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,11 +21,10 @@ app.use(express.json());
 app.get("/", (req, res) => {
   res.send("VersElite API running ✅");
 });
-app.use("/api/newsletter", newsletterRoutes);
 
-// Dynamically import routes after env is loaded
-const { default: aiRoutes } = await import("./routes/ai/ai.routes.js");
-app.use("/api/ai", authenticateUser, aiRoutes);
+// Routes
+app.use("/api/newsletter", newsletterRoutes);
+app.use("/api/ai", chatRoutes); // Chat endpoint – no auth required (or add authenticateUser if desired)
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
