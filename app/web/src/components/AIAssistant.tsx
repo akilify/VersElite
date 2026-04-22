@@ -1,8 +1,6 @@
-import { useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Sparkles,
-  Loader2,
   Send,
   Copy,
   Check,
@@ -12,7 +10,7 @@ import {
   RefreshCw,
   Lightbulb,
 } from "lucide-react";
-import { chatWithAI } from "@/features/ai/ai.api";
+import { chatWithAIStream, type ChatMessage } from "@/features/ai/ai.api";
 
 interface Message {
   id: string;
@@ -24,10 +22,13 @@ interface Message {
 interface AIAssistantProps {
   onInsert: (text: string) => void;
   currentContent?: string;
-  selectedText?: string; // New: pass selected text from editor
+  selectedText?: string;
 }
 
-// Format AI responses for clean editor insertion
+/**
+ * Format AI responses for clean editor insertion.
+ * Strips markdown, standardizes lists, and normalizes spacing.
+ */
 const formatAIResponse = (text: string): string => {
   return text
     .replace(/^#{1,3}\s+/gm, "")
@@ -42,7 +43,6 @@ const formatAIResponse = (text: string): string => {
     .trim();
 };
 
-// Pre-defined quick actions
 const QUICK_ACTIONS = [
   {
     label: "Continue",
@@ -62,108 +62,166 @@ const QUICK_ACTIONS = [
   {
     label: "Rewrite",
     icon: RefreshCw,
-    prompt:
-      "Rewrite the following stanza in a different style (e.g., more lyrical, concise, or vivid).",
+    prompt: "Rewrite the following stanza in a different style.",
   },
 ];
+
+const WELCOME_MESSAGE: Message = {
+  id: "welcome",
+  role: "assistant",
+  content:
+    "Hello! I'm your poetry assistant. Use the quick actions below or ask me anything.",
+  timestamp: new Date(),
+};
 
 export function AIAssistant({
   onInsert,
   currentContent = "",
   selectedText = "",
 }: AIAssistantProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content:
-        "Hello! I'm your poetry assistant. Use the quick actions below or ask me anything.",
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingContent, setStreamingContent] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const scrollToBottom = () => {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, streamingContent, scrollToBottom]);
 
-  const sendMessage = async (messageContent: string) => {
-    if (!messageContent.trim() || isLoading) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: messageContent.trim(),
-      timestamp: new Date(),
+  // Cancel any ongoing stream when component unmounts
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
     };
-    setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true);
+  }, []);
 
-    try {
-      const apiMessages = [...messages, userMessage].map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+  const sendMessage = useCallback(
+    async (messageContent: string) => {
+      if (!messageContent.trim() || isLoading) return;
 
-      // Include selected text or fallback to current content
+      // Clear any previous error
+      setError(null);
+
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        role: "user",
+        content: messageContent.trim(),
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, userMessage]);
+      setInput("");
+      setIsLoading(true);
+      setIsStreaming(true);
+      setStreamingContent("");
+
+      // Prepare messages for API
+      const apiMessages: ChatMessage[] = [...messages, userMessage].map(
+        (m) => ({
+          role: m.role,
+          content: m.content,
+        }),
+      );
+
       const context = selectedText || currentContent;
-      const response = await chatWithAI(apiMessages, context);
+      let accumulated = "";
 
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: formatAIResponse(response.reply),
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (error: any) {
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: `Sorry, I encountered an error: ${error.message}. Please try again.`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
+      // Create new abort controller for this request
+      abortControllerRef.current = new AbortController();
+
+      chatWithAIStream(apiMessages, context, {
+        onChunk: (chunk: string) => {
+          accumulated += chunk;
+          setStreamingContent(formatAIResponse(accumulated));
+        },
+        onComplete: () => {
+          const assistantMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: formatAIResponse(accumulated),
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, assistantMessage]);
+          setStreamingContent("");
+          setIsLoading(false);
+          setIsStreaming(false);
+          abortControllerRef.current = null;
+        },
+        onError: (err: Error) => {
+          setError(err.message);
+          const errorMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: "assistant",
+            content: `Sorry, I encountered an error: ${err.message}. Please try again.`,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, errorMessage]);
+          setStreamingContent("");
+          setIsLoading(false);
+          setIsStreaming(false);
+          abortControllerRef.current = null;
+        },
+        signal: abortControllerRef.current.signal,
+      });
+    },
+    [messages, isLoading, selectedText, currentContent],
+  );
+
+  const handleSend = useCallback(() => {
+    if (input.trim()) {
+      sendMessage(input);
     }
-  };
+  }, [input, sendMessage]);
 
-  const handleSend = () => {
-    sendMessage(input);
-    setInput("");
-  };
+  const handleQuickAction = useCallback(
+    (action: (typeof QUICK_ACTIONS)[0]) => {
+      let prompt = action.prompt;
+      if (selectedText) {
+        prompt = `${prompt}\n\nSelected text: "${selectedText}"`;
+      } else if (currentContent) {
+        const truncated =
+          currentContent.length > 500
+            ? currentContent.slice(0, 500) + "..."
+            : currentContent;
+        prompt = `${prompt}\n\nCurrent draft: "${truncated}"`;
+      }
+      sendMessage(prompt);
+    },
+    [selectedText, currentContent, sendMessage],
+  );
 
-  const handleQuickAction = (action: (typeof QUICK_ACTIONS)[0]) => {
-    let prompt = action.prompt;
-    if (selectedText) {
-      prompt = `${prompt}\n\nSelected text: "${selectedText}"`;
-    } else if (currentContent) {
-      prompt = `${prompt}\n\nCurrent draft: "${currentContent.slice(0, 500)}${currentContent.length > 500 ? "..." : ""}"`;
-    }
-    sendMessage(prompt);
-  };
-
-  const handleCopy = async (content: string, id: string) => {
+  const handleCopy = useCallback(async (content: string, id: string) => {
     await navigator.clipboard.writeText(content);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
-  };
+  }, []);
 
-  const handleInsert = (content: string) => {
-    onInsert(formatAIResponse(content));
-  };
+  const handleInsert = useCallback(
+    (content: string) => {
+      onInsert(formatAIResponse(content));
+    },
+    [onInsert],
+  );
 
-  const clearChat = () => {
-    setMessages([messages[0]]);
-  };
+  const clearChat = useCallback(() => {
+    // Abort any ongoing stream
+    abortControllerRef.current?.abort();
+    setMessages([WELCOME_MESSAGE]);
+    setStreamingContent("");
+    setIsLoading(false);
+    setIsStreaming(false);
+    setError(null);
+  }, []);
 
   return (
     <div className="flex flex-col h-full bg-[#0B0B0C]">
@@ -196,6 +254,13 @@ export function AIAssistant({
           </button>
         ))}
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/30 text-red-400 text-xs text-center">
+          {error}
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -237,13 +302,26 @@ export function AIAssistant({
             </div>
           </div>
         ))}
-        {isLoading && (
+
+        {/* Streaming message */}
+        {isStreaming && (
           <div className="flex justify-start">
-            <div className="bg-[#121214] border border-[#1f1f22] rounded-2xl px-4 py-3">
-              <Loader2 size={16} className="animate-spin text-[#D4AF37]" />
+            <div className="bg-[#121214] border border-[#1f1f22] rounded-2xl px-4 py-3 max-w-[85%]">
+              <p className="text-sm whitespace-pre-wrap">
+                {streamingContent || (
+                  <span className="inline-flex items-center gap-1">
+                    <Loader2
+                      size={14}
+                      className="animate-spin text-[#D4AF37]"
+                    />{" "}
+                    Thinking...
+                  </span>
+                )}
+              </p>
             </div>
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
