@@ -1,11 +1,11 @@
-import { useState, useContext, useRef } from "react";
+import { useState, useContext, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useHotkeys } from "react-hotkeys-hook";
 import useSound from "use-sound";
 import { AuthContext } from "@/features/auth/AuthProvider";
 import { FloatingNav } from "@/components/FloatingNav";
 import { AuthModal } from "@/components/AuthModal";
-import { Minimize2 } from "lucide-react";
+import { Minimize2, Loader2 } from "lucide-react";
 import { CursorTrail } from "@/components/CursorTrail";
 import { CreateHeader } from "./components/CreateHeader";
 import { EditorWorkspace } from "./components/EditorWorkspace";
@@ -34,7 +34,62 @@ export default function CreatePage() {
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const [playPublish] = useSound("/sounds/publish.mp3", { volume: 0.4 });
 
-  // Auth guard
+  // ✅ All hooks must be called unconditionally, in the same order every render
+  const {
+    draft,
+    updateDraft,
+    saveStatus,
+    isOnline,
+    pendingPublishes,
+    publish,
+    isLoading: isDraftLoading,
+  } = useCreateDraft(session);
+
+  const {
+    isCollaborative,
+    collabId,
+    toggle: toggleCollaboration,
+  } = useCollaborationMode(
+    session ? draft.id : null,
+    session ? draft.title : "",
+    session?.user?.id || "",
+  );
+
+  const { upload } = useMediaUpload(session?.user?.id || "");
+  const stats = useEditorStats(draft.content);
+  const plainText = stripHtml(draft.content);
+
+  const handlePublish = useCallback(() => {
+    playPublish();
+    setPublishModalOpen(true);
+  }, [playPublish]);
+
+  const handleContentUpdate = useCallback(
+    (newContent: string) => {
+      updateDraft({ content: newContent });
+    },
+    [updateDraft],
+  );
+
+  const handleAIInsert = useCallback(
+    (text: string) => {
+      const separator = draft.content ? "\n\n" : "";
+      handleContentUpdate(draft.content + separator + text);
+    },
+    [draft.content, handleContentUpdate],
+  );
+
+  const handleToggleCollaboration = useCallback(async () => {
+    await toggleCollaboration(draft.content, handleContentUpdate);
+  }, [toggleCollaboration, draft.content, handleContentUpdate]);
+
+  // Keyboard shortcuts (must be called unconditionally)
+  useHotkeys("ctrl+shift+f", () => setFocusMode(!focusMode), [focusMode]);
+  useHotkeys("ctrl+/", () => setAiPanelOpen(!aiPanelOpen), [aiPanelOpen]);
+  useHotkeys("ctrl+s", (e) => e.preventDefault(), []);
+  useHotkeys("?", () => setShortcutsModalOpen(true), []);
+
+  // ✅ Auth guard moved AFTER all hooks
   if (!session) {
     return (
       <>
@@ -57,41 +112,13 @@ export default function CreatePage() {
     );
   }
 
-  const {
-    draft,
-    updateDraft,
-    saveStatus,
-    isOnline,
-    pendingPublishes,
-    publish,
-  } = useCreateDraft(session);
-  const {
-    isCollaborative,
-    collabId,
-    toggle: toggleCollaboration,
-  } = useCollaborationMode(draft.id, draft.title, session.user.id);
-  const { upload } = useMediaUpload(session.user.id);
-  const stats = useEditorStats(draft.content);
-  const plainText = stripHtml(draft.content);
-
-  const handlePublish = () => {
-    playPublish();
-    setPublishModalOpen(true);
-  };
-
-  const handleContentUpdate = (newContent: string) => {
-    updateDraft({ content: newContent });
-  };
-
-  const handleToggleCollaboration = async () => {
-    await toggleCollaboration(draft.content, handleContentUpdate);
-  };
-
-  // Keyboard shortcuts
-  useHotkeys("ctrl+shift+f", () => setFocusMode(!focusMode), [focusMode]);
-  useHotkeys("ctrl+/", () => setAiPanelOpen(!aiPanelOpen), [aiPanelOpen]);
-  useHotkeys("ctrl+s", (e) => e.preventDefault(), []);
-  useHotkeys("?", () => setShortcutsModalOpen(true), []);
+  if (isDraftLoading) {
+    return (
+      <div className="min-h-screen bg-[#0B0B0C] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-[#D4AF37] animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -149,11 +176,9 @@ export default function CreatePage() {
           isOpen={aiPanelOpen}
           onToggle={() => setAiPanelOpen(!aiPanelOpen)}
           rhymeWord={rhymeWord}
-          onInsert={(text) =>
-            handleContentUpdate(
-              draft.content + (draft.content ? "\n\n" : "") + text,
-            )
-          }
+          draftId={draft.id}
+          currentContent={draft.content}
+          onInsert={handleAIInsert}
         />
       </div>
       <PublishModal

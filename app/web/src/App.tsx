@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import HomePage from "@/pages/HomePage";
 import LoginPage from "@/pages/LoginPage";
-import AITestPage from "@/pages/AITestPage";
 import ChatPage from "@/pages/ChatPage";
 import CollaborationPage from "@/pages/CollaborationPage";
 import PrivacyPage from "@/pages/PrivacyPage";
@@ -20,7 +19,6 @@ export default function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/ai-test" element={<AITestPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/collab/:id" element={<CollaborationPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
